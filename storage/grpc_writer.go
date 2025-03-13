@@ -122,6 +122,7 @@ func (s *gRPCAppendBidiWriteBufferSender) withRequestParams(ctx context.Context)
 func (s *gRPCAppendBidiWriteBufferSender) startReceiver(ctx context.Context) (err error) {
 	s.stream, err = s.raw.BidiWriteObject(s.withRequestParams(ctx), s.settings.gax...)
 	if err != nil {
+		s.stream = nil
 		return
 	}
 

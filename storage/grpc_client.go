@@ -2726,6 +2726,7 @@ func (s *gRPCOneshotBidiWriteBufferSender) sendBuffer(ctx context.Context, buf [
 	if s.stream == nil {
 		s.stream, err = s.raw.BidiWriteObject(ctx, s.settings.gax...)
 		if err != nil {
+			s.stream = nil
 			return
 		}
 		firstMessage = s.firstMessage
@@ -2835,6 +2836,7 @@ func (s *gRPCResumableBidiWriteBufferSender) sendBuffer(ctx context.Context, buf
 		}
 		s.stream, err = s.raw.BidiWriteObject(ctx, s.settings.gax...)
 		if err != nil {
+			s.stream = nil
 			return
 		}
 		reconnected = true
