@@ -1099,10 +1099,14 @@ func TestOpenAppendableWriterMultipleChunksEmulated(t *testing.T) {
 		// This should chunk the request into three separate flushes to storage.
 		w.ChunkSize = MiB
 		var lastReportedOffset int64
+		progresses := []int64{2 * MiB, 3 * MiB}
 		w.ProgressFunc = func(offset int64) {
-			if offset != lastReportedOffset+MiB {
-				t.Errorf("incorrect progress report: got %d; want %d", offset, lastReportedOffset+MiB)
+			if len(progresses) == 0 {
+				t.Errorf("incorrect progress report: got %d; want none", offset)
+			} else if offset != progresses[0] {
+				t.Errorf("incorrect progress report: got %d; want %d", offset, progresses[0])
 			}
+			progresses = progresses[1:]
 			lastReportedOffset = offset
 		}
 		_, err = w.Write(randomBytes3MiB)
@@ -1350,7 +1354,7 @@ func TestWriterFlushAtCloseEmulated(t *testing.T) {
 		w.ProgressFunc = func(offset int64) {
 			gotOffsets = append(gotOffsets, offset)
 		}
-		wantOffsets := []int64{MiB, 2 * MiB, 3 * MiB}
+		wantOffsets := []int64{2 * MiB, 3 * MiB}
 
 		// Test Flush right before close only.
 		n, err := w.Write(randomBytes3MiB)
@@ -1493,7 +1497,7 @@ func TestWriterSmallFlushEmulated(t *testing.T) {
 				w.ProgressFunc = func(offset int64) {
 					gotOffsets = append(gotOffsets, offset)
 				}
-				wantOffsets := []int64{10, 1010, 1010 + MiB, 1010 + 2*MiB, 3 * MiB}
+				wantOffsets := []int64{10, 1010, 1010 + 2*MiB, 3 * MiB}
 
 				// Make content with fixed first 10 bytes which will yield
 				// expected type when sniffed.
