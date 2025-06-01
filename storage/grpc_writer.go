@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -559,10 +560,10 @@ func (c *gRPCWriterCommandWrite) handle(w *gRPCWriter, cs gRPCCommandHandleChans
 		return true
 	}
 
-	// We have at least one full buffer, followed by a partial. The first full
-	// buffer is the interesting one. We don't actually have to copy all of c.p
-	// in: we can send from it in place, except for any partial quantum at the
-	// tail of w.buf. Send that quantum...
+	// We have at least one full buffer, followed by a partial. We only have to
+	// flush after the last full buffer. We don't immediately have to copy c.p
+	// anywhere: we can send from it in place, except for any partial quantum at
+	// the tail of w.buf. Send that quantum...
 	toNextWriteQuantum := func() int {
 		if wblen > w.lastSegmentStart {
 			return cap(w.buf) - w.lastSegmentStart
@@ -578,13 +579,15 @@ func (c *gRPCWriterCommandWrite) handle(w *gRPCWriter, cs gRPCCommandHandleChans
 	firstFullBufFromCmd := cap(w.buf) - len(w.buf)
 
 	sending := w.buf[w.bufUnsentIdx:]
-	if _, ok := w.sendBufferToTarget(cs, sending, w.bufBaseOffset+int64(w.bufUnsentIdx), cap(sending),
+	// We never have to flush this here.
+	if _, ok := w.sendBufferToTarget(cs, sending, w.bufBaseOffset+int64(w.bufUnsentIdx), math.MaxInt64,
 		func(r gRPCBidiWriteRequest) { w.bufUnsentIdx += len(r.buf) }, w.handleCompletion); !ok {
 		return false
 	}
 
-	// ...then send the prefix of c.p which could fill w.buf
+	// ...then send the prefix of c.p up to the target flush offset.
 	cmdBaseOffset := w.bufBaseOffset + int64(len(w.buf))
+	flushTarget := cmdBaseOffset + int64((fullBufs-1)*cap(w.buf)+firstFullBufFromCmd)
 	cmdBuf := c.p
 	updateCmdBaseOffset := func(cmp gRPCBidiWriteCompletion) {
 		w.handleCompletion(cmp)
@@ -600,30 +603,16 @@ func (c *gRPCWriterCommandWrite) handle(w *gRPCWriter, cs gRPCCommandHandleChans
 		c.p = c.p[trim:]
 		cmdBaseOffset = bufTail
 	}
-	offset := cmdBaseOffset
-	sent, ok := w.sendBufferToTarget(cs, cmdBuf, cmdBaseOffset, firstFullBufFromCmd,
-		func(r gRPCBidiWriteRequest) { offset += int64(len(r.buf)) }, updateCmdBaseOffset)
+	sent, ok := w.sendBufferToTarget(cs, cmdBuf, cmdBaseOffset, int(flushTarget-cmdBaseOffset),
+		func(r gRPCBidiWriteRequest) {}, updateCmdBaseOffset)
 	if !ok {
 		return false
 	}
 	cmdBuf = cmdBuf[sent:]
 
-	// Remaining full buffers can be satisfied entirely from cmdBuf with no copies.
-	for i := 0; i < fullBufs-1; i++ {
-		sent, ok := w.sendBufferToTarget(cs, cmdBuf, offset, cap(w.buf),
-			func(r gRPCBidiWriteRequest) { offset += int64(len(r.buf)) }, updateCmdBaseOffset)
-		if !ok {
-			return false
-		}
-		cmdBuf = cmdBuf[sent:]
-	}
-
-	// Send the last partial buffer, but first remember what we've sent to. That's
-	// what we need to see flushed before we can copy into w.buf and complete this
-	// command.
-	flushTarget := offset
-	sent, ok = w.sendBufferToTarget(cs, cmdBuf, offset, cap(w.buf),
-		func(r gRPCBidiWriteRequest) { offset += int64(len(r.buf)) }, updateCmdBaseOffset)
+	// Send the last partial buffer.
+	sent, ok = w.sendBufferToTarget(cs, cmdBuf, flushTarget, cap(w.buf),
+		func(r gRPCBidiWriteRequest) {}, updateCmdBaseOffset)
 	if !ok {
 		return false
 	}
