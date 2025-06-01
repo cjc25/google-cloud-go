@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -589,10 +590,10 @@ func (c *gRPCWriterCommandWrite) handle(w *gRPCWriter, cs gRPCWriterCommandHandl
 		return nil
 	}
 
-	// We have at least one full buffer, followed by a partial. The first full
-	// buffer is the interesting one. We don't actually have to copy all of c.p
-	// in: we can send from it in place, except for any partial quantum at the
-	// tail of w.buf. Send that quantum...
+	// We have at least one full buffer, followed by a partial. We only have to
+	// flush after the last full buffer. We don't immediately have to copy c.p
+	// anywhere: we can send from it in place, except for any partial quantum at
+	// the tail of w.buf. Send that quantum...
 	toNextWriteQuantum := func() int {
 		if wblen > w.lastSegmentStart {
 			return cap(w.buf) - wblen
@@ -608,14 +609,16 @@ func (c *gRPCWriterCommandWrite) handle(w *gRPCWriter, cs gRPCWriterCommandHandl
 	firstFullBufFromCmd := cap(w.buf) - len(w.buf)
 
 	sending := w.buf[w.bufUnsentIdx:]
-	sentOffset, ok := w.sendBufferToTarget(cs, sending, w.bufBaseOffset+int64(w.bufUnsentIdx), cap(sending),
+	// We never have to flush this here.
+	sentOffset, ok := w.sendBufferToTarget(cs, sending, w.bufBaseOffset+int64(w.bufUnsentIdx), math.MaxInt64,
 		w.handleCompletion)
 	if !ok {
 		return w.streamSender.err()
 	}
 
-	// ...then send the prefix of c.p which could fill w.buf
+	// ...then send the prefix of c.p up to the target flush offset.
 	cmdBaseOffset := w.bufBaseOffset + int64(len(w.buf))
+	flushTarget := cmdBaseOffset + int64((fullBufs-1)*cap(w.buf)+firstFullBufFromCmd)
 	cmdBuf := c.p
 	trimCommandBuf := func(cmp gRPCBidiWriteCompletion) {
 		w.handleCompletion(cmp)
@@ -631,25 +634,13 @@ func (c *gRPCWriterCommandWrite) handle(w *gRPCWriter, cs gRPCWriterCommandHandl
 		c.p = c.p[trim:]
 		cmdBaseOffset = bufTail
 	}
-	offset := cmdBaseOffset
-	sentOffset, ok = w.sendBufferToTarget(cs, cmdBuf, offset, firstFullBufFromCmd,
+	sentOffset, ok = w.sendBufferToTarget(cs, cmdBuf, cmdBaseOffset, int(flushTarget-cmdBaseOffset),
 		trimCommandBuf)
 	if !ok {
 		return w.streamSender.err()
 	}
-	cmdBuf = cmdBuf[int(sentOffset-offset):]
-	offset = sentOffset
-
-	// Remaining full buffers can be satisfied entirely from cmdBuf with no copies.
-	for i := 0; i < fullBufs-1; i++ {
-		sentOffset, ok = w.sendBufferToTarget(cs, cmdBuf, offset, cap(w.buf),
-			trimCommandBuf)
-		if !ok {
-			return w.streamSender.err()
-		}
-		cmdBuf = cmdBuf[int(sentOffset-offset):]
-		offset = sentOffset
-	}
+	cmdBuf = cmdBuf[int(sentOffset-cmdBaseOffset):]
+	offset := sentOffset
 
 	// Send the last partial buffer. We need to flush to offset before we can copy
 	// the rest of cmdBuf into w.buf and complete this command.
