@@ -4200,8 +4200,8 @@ func TestIntegration_WriterAppendEdgeCases(t *testing.T) {
 			t.Fatalf("w2.Close: %v", err)
 		}
 
-		// If we add yet another takeover writer to finalize and delete the object,
-		// tw should return an error on flush.
+		// If we add yet another takeover writer to finalize the object, tw should
+		// return an error on flush.
 		tw2, _, err := obj.Generation(w2.Attrs().Generation).NewWriterFromAppendableObject(ctx, &AppendableWriterOpts{
 			FinalizeOnClose: true,
 		})
