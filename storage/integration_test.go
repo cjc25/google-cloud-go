@@ -4186,7 +4186,7 @@ func TestIntegration_WriterAppendEdgeCases(t *testing.T) {
 			_, err = w.Flush()
 		}
 		if code := status.Code(err); !(code == codes.FailedPrecondition || code == codes.Aborted) {
-			t.Fatalf("w.Write: got error %v, want FailedPrecondition or Aborted", err)
+			t.Fatalf("w.Write or w.Flush: got error %v, want FailedPrecondition or Aborted", err)
 		}
 
 		// Another NewWriter to the unfinalized object should be able to
@@ -4216,7 +4216,7 @@ func TestIntegration_WriterAppendEdgeCases(t *testing.T) {
 			_, err = tw.Flush()
 		}
 		if code := status.Code(err); !(code == codes.FailedPrecondition || code == codes.Aborted) {
-			t.Errorf("tw.Flush: got error %v, want FailedPrecondition or Aborted", err)
+			t.Errorf("tw.Write or tw.Flush: got error %v, want FailedPrecondition or Aborted", err)
 		}
 	})
 }
